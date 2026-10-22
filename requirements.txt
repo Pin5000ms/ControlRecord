@@ -1,0 +1,4 @@
+PySide6-Essentials==6.10.1
+pynput==1.8.1
+imageio-ffmpeg==0.6.0
+
