@@ -23,6 +23,7 @@ from .storage import Storage
 from .windows import PowerGuard, desktop_available, screen_info
 from .worker import RunWorker
 from .overlay import RecordingOverlay, play_start_sound
+from .icons import action_icon
 
 
 STYLE = """
@@ -208,6 +209,8 @@ class MainWindow(QMainWindow):
         self.name_edit.setPlaceholderText("新腳本名稱，例如：每日操作")
         self.name_edit.setMaxLength(100)
         self.record_button = QPushButton("開始錄製")
+        self.record_button.setIcon(action_icon('record', '#c94444'))
+        self.record_button.setIconSize(QSize(20, 20))
         self.record_button.clicked.connect(self.prepare_recording)
         row.addWidget(self.name_edit, 1)
         row.addWidget(self.record_button)
@@ -250,6 +253,8 @@ class MainWindow(QMainWindow):
         self.record_video.setChecked(True)
         run_layout.addWidget(self.record_video)
         self.run_button = QPushButton("執行腳本")
+        self.run_button.setIcon(action_icon('play', '#ffffff'))
+        self.run_button.setIconSize(QSize(20, 20))
         self.run_button.setObjectName("primary")
         self.run_button.clicked.connect(self.prepare_run)
         run_layout.addWidget(self.run_button)
@@ -267,6 +272,8 @@ class MainWindow(QMainWindow):
         self.progress.setTextVisible(False)
         state_layout.addWidget(self.progress)
         self.stop_button = QPushButton("停止  F12")
+        self.stop_button.setIcon(action_icon('stop', '#b43c3c'))
+        self.stop_button.setIconSize(QSize(20, 20))
         self.stop_button.setObjectName("stop")
         self.stop_button.clicked.connect(self.stop)
         state_layout.addWidget(self.stop_button)
@@ -344,6 +351,8 @@ class MainWindow(QMainWindow):
             details.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             layout.addWidget(details, 1)
             delete = QPushButton("刪除")
+            delete.setIcon(action_icon('delete', '#b43c3c'))
+            delete.setIconSize(QSize(16, 16))
             delete.setObjectName("deleteScript")
             delete.setToolTip(f"刪除腳本：{script.name}")
             delete.clicked.connect(lambda checked=False, script=script: self.delete_script(script))
