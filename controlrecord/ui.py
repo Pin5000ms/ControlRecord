@@ -24,6 +24,7 @@ from .windows import PowerGuard, desktop_available, screen_info
 from .worker import RunWorker
 from .overlay import RecordingOverlay, play_start_sound
 from .icons import action_icon
+from .schedule_ui import SchedulePage
 
 
 STYLE = """
@@ -72,6 +73,12 @@ QHeaderView::section { background: #eaf0f5; border: none; padding: 10px; font-we
 QProgressBar { border: none; border-radius: 4px; background: #e8eef2; min-height: 8px; max-height: 8px; }
 QProgressBar::chunk { background: #0b9b8a; border-radius: 4px; }
 QCheckBox { spacing: 8px; }
+QComboBox, QDateTimeEdit, QTimeEdit { background: white; color: #203044; padding: 7px; border: 1px solid #cbd5e0; border-radius: 6px; }
+QComboBox QAbstractItemView { background: white; color: #203044; selection-background-color: #d8eee8; }
+QCalendarWidget QWidget { background: #f3f5f8; color: #203044; }
+QCalendarWidget QAbstractItemView { background: white; color: #203044; selection-background-color: #087f73; selection-color: white; }
+QPushButton#weekday { padding: 7px; }
+QPushButton#weekday:checked { background: #087f73; color: white; border-color: #087f73; }
 """
 
 
@@ -121,6 +128,7 @@ class MainWindow(QMainWindow):
         self.hotkeys = None
         self.hotkeys_ok = not services
         self.last_result = None
+        self.active_schedule = None
         self.recording_overlay = RecordingOverlay()
         self.setWindowTitle("ControlRecord · 滑鼠錄製工具")
         self.setMinimumSize(900, 700)
@@ -305,6 +313,8 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.log_button)
         hist.addLayout(actions)
         self.tabs.addTab(history, "執行紀錄")
+        self.schedule_page = SchedulePage(self)
+        self.tabs.addTab(self.schedule_page, "排程執行")
 
         footer = QHBoxLayout()
         self.power_label = label("防休眠未啟用", "muted")
@@ -363,6 +373,8 @@ class MainWindow(QMainWindow):
         if self.script_list.currentRow() < 0 and scripts:
             self.script_list.setCurrentRow(0)
         self.empty_label.setVisible(not scripts)
+        if hasattr(self, 'schedule_page'):
+            self.schedule_page.refresh_scripts()
         if errors:
             self.message.setText("部分腳本無法讀取：" + "；".join(errors[:3]))
         self._controls()
@@ -376,6 +388,27 @@ class MainWindow(QMainWindow):
         else:
             self.script_info.setText("請先從左側選擇腳本。")
         self._controls()
+
+    def launch_schedule(self, item):
+        if self.state != 'idle' or self.worker is not None or self.close_pending or QApplication.activeModalWidget():
+            return '略過：程式忙碌'
+        if not self.hotkeys_ok:
+            return '略過：快捷鍵不可用'
+        script = next((s for s in self.storage.list_scripts()[0] if s.id == item['script_id']), None)
+        if script is None:
+            item['enabled'] = False
+            return '已取消：腳本不存在'
+        script.validate()
+        if self.preflight() != script.screen:
+            return '略過：螢幕設定與錄製時不同'
+        self.pending_script = script
+        self.pending_repeats = 1
+        self.record_video.setChecked(item['video'])
+        self.cancel.clear()
+        self.last_result = None
+        self.active_schedule = item['id']
+        self.begin_run(scheduled=True)
+        return '已啟動' if self.state == 'running' else '啟動失敗'
 
     def _controls(self):
         if not hasattr(self, "run_button"):
@@ -496,7 +529,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.error(exc)
 
-    def begin_run(self):
+    def begin_run(self, scheduled=False):
         try:
             if self.preflight() != self.pending_script.screen:
                 raise RuntimeError("倒數期間螢幕設定改變，已取消執行。")
@@ -516,7 +549,11 @@ class MainWindow(QMainWindow):
             self.state = "idle"
             self.showNormal()
             self._controls()
-            self.error(exc)
+            if scheduled:
+                self.message.setText(f'排程啟動失敗：{exc}')
+                self.active_schedule = None
+            else:
+                self.error(exc)
 
     def run_stage(self, message):
         self.status_label.setText(message)
@@ -531,6 +568,17 @@ class MainWindow(QMainWindow):
     def run_result(self, record):
         self.last_result = record
         self.refresh_history()
+        if self.active_schedule and self.schedule_page.store:
+            for item in self.schedule_page.store.items:
+                if item['id'] == self.active_schedule:
+                    states = {'completed': '已完成', 'stopped': '已停止', 'failed': '失敗'}
+                    item['status'] = f"{datetime.now():%m-%d %H:%M} {states.get(record['status'], record['status'])}"
+                    try:
+                        self.schedule_page.store.save()
+                        self.schedule_page.refresh()
+                    except OSError:
+                        logging.exception('Could not save schedule result')
+            self.active_schedule = None
 
     def run_finished(self):
         self.state = "idle"
@@ -614,13 +662,14 @@ class MainWindow(QMainWindow):
     def delete_script(self, script):
         if self.state != "idle":
             return
-        answer = QMessageBox.question(self, "刪除腳本", f"確定刪除「{script.name}」？\n已保存的執行紀錄與影片會保留。",
+        answer = QMessageBox.question(self, "刪除腳本", f"確定刪除「{script.name}」？\n相關待執行排程會取消，既有執行紀錄與影片會保留。",
                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                       QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
             self.storage.delete(script.id)
+            self.schedule_page.cancel_script(script.id)
             self.refresh_scripts()
             self.status_label.setText("腳本已刪除")
         except OSError as exc:
@@ -699,6 +748,7 @@ class MainWindow(QMainWindow):
         if self.state == "recording":
             self.finish_recording(reason="關閉程式視窗")
         self.timer.stop()
+        self.schedule_page.timer.stop()
         self.recording_overlay.close()
         self.recording_overlay.deleteLater()
         if self.hotkeys:

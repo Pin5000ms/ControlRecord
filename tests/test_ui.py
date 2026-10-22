@@ -40,6 +40,29 @@ class UiTests(unittest.TestCase):
         self.assertIsNone(self.window.worker)
         self.assertFalse(list(self.storage.runs.iterdir()))
 
+    def test_schedule_uses_one_repeat_and_its_video_choice(self):
+        item = {'id': 'schedule-test', 'script_id': self.window.selected_script().id, 'video': False}
+        self.window.repeat.setValue(99)
+        with patch('controlrecord.ui.RunWorker') as worker:
+            result = self.window.launch_schedule(item)
+            self.assertEqual(result, '已啟動')
+            self.assertEqual(worker.call_args.args[1], 1)
+            self.assertFalse(worker.call_args.kwargs['record_video'])
+        self.window.worker = None
+        self.window.state = 'idle'
+
+    def test_busy_schedule_does_not_interrupt_recording(self):
+        self.window.state = 'prepare_record'
+        with patch('controlrecord.ui.RunWorker') as worker:
+            self.assertIn('忙碌', self.window.launch_schedule({}))
+            worker.assert_not_called()
+        self.window.state = 'idle'
+
+    def test_missing_script_cancels_schedule(self):
+        item = {'script_id': 'missing', 'enabled': True}
+        self.assertIn('腳本不存在', self.window.launch_schedule(item))
+        self.assertFalse(item['enabled'])
+
     def test_delete_row_cancel_then_confirm_preserves_history(self):
         marker = self.storage.runs / "keep.txt"
         marker.write_text("keep")
