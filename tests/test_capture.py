@@ -45,6 +45,16 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(script.events[-1].data["x"], 30)
         self.assertLess(script.events[-1].t, script.duration)
 
+    def test_overlay_drag_moves_are_excluded_then_recording_resumes(self):
+        recorder = self.recorder()
+        with patch('controlrecord.capture.own_window_at', return_value=True):
+            recorder._click(10, 20, mouse.Button.left, True)
+        recorder._move(100, 200)
+        recorder._click(100, 200, mouse.Button.left, False)
+        self.assertEqual(recorder.events, [])
+        recorder._move(110, 210)
+        self.assertEqual(len(recorder.events), 1)
+
     def test_raw_edge_coordinates_are_clipped_without_stopping(self):
         recorder = self.recorder()
         for x, y in ((2000, 20), (30, -50), (-9000, 5000), (9000, -9000)):

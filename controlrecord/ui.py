@@ -22,6 +22,7 @@ from .model import Script, save_script
 from .storage import Storage
 from .windows import PowerGuard, desktop_available, screen_info
 from .worker import RunWorker
+from .overlay import RecordingOverlay, play_start_sound
 
 
 STYLE = """
@@ -119,6 +120,7 @@ class MainWindow(QMainWindow):
         self.hotkeys = None
         self.hotkeys_ok = not services
         self.last_result = None
+        self.recording_overlay = RecordingOverlay()
         self.setWindowTitle("ControlRecord · 滑鼠錄製工具")
         self.setMinimumSize(900, 700)
         self.resize(1080, 840)
@@ -211,6 +213,9 @@ class MainWindow(QMainWindow):
         row.addWidget(self.record_button)
         record_layout.addLayout(row)
         record_layout.addWidget(label("準備 3 秒後開始；按 F8 結束並自動儲存。", "muted", True))
+        self.start_sound = QCheckBox("錄製開始時播放提示音")
+        self.start_sound.setChecked(True)
+        record_layout.addWidget(self.start_sound)
         dash.addWidget(record_card)
 
         run_card, run_layout = card()
@@ -375,7 +380,7 @@ class MainWindow(QMainWindow):
         self.import_button.setEnabled(idle)
         self.folder_button.setEnabled(idle)
         self.script_list.setEnabled(idle)
-        for widget in (self.name_edit, self.repeat, self.hours, self.minutes, self.seconds, self.record_video):
+        for widget in (self.name_edit, self.repeat, self.hours, self.minutes, self.seconds, self.record_video, self.start_sound):
             widget.setEnabled(idle)
         self.tabs.setTabEnabled(1, idle)
 
@@ -403,6 +408,7 @@ class MainWindow(QMainWindow):
             self.state = "prepare_record"
             self.deadline = time.perf_counter() + 3
             self.status_label.setText("準備錄製 · 3 秒")
+            self.recording_overlay.countdown(3)
             self.message.setText("請將游標移至目標程式。開始後視窗會自動縮小，按 F8 儲存。")
             self.progress.setValue(0)
             self._controls()
@@ -416,10 +422,14 @@ class MainWindow(QMainWindow):
             self.recorder = MouseRecorder(self.pending_name, screen)
             self.recorder.start()
             self.state = "recording"
+            self.recording_overlay.recording(0, 0)
+            if self.start_sound.isChecked():
+                play_start_sound()
             self.status_label.setText("正在錄製 · F8 結束")
             self._controls()
         except Exception as exc:
             self.state = "idle"
+            self.recording_overlay.hide()
             self.recorder = None
             logging.exception("Recording startup failed")
             self.showNormal()
@@ -430,6 +440,7 @@ class MainWindow(QMainWindow):
         if self.state != "recording":
             return
         recorder = self.recorder
+        self.recording_overlay.hide()
         self.recorder = None
         try:
             script = recorder.stop()
@@ -539,6 +550,7 @@ class MainWindow(QMainWindow):
         if self.state == "recording":
             self.finish_recording(reason="按下 F12 或停止按鈕")
         elif self.state in ("prepare_record", "countdown"):
+            self.recording_overlay.hide()
             self.state = "idle"
             self.status_label.setText("已取消倒數")
             self.message.setText("尚未開始操作。")
@@ -556,6 +568,8 @@ class MainWindow(QMainWindow):
                     self.stop()
                     return
                 remaining = max(0, self.deadline - time.perf_counter())
+                if self.state == "prepare_record":
+                    self.recording_overlay.countdown(remaining)
                 self.status_label.setText(("準備錄製" if self.state == "prepare_record" else "距離執行") + f" · {duration_text(remaining + 0.999)}")
                 if remaining <= 0:
                     if self.state == "prepare_record":
@@ -569,6 +583,7 @@ class MainWindow(QMainWindow):
                 if not desktop_available():
                     raise RuntimeError("Windows 桌面已鎖定或切換，錄製已停止。")
                 elapsed = time.perf_counter() - self.recorder.started
+                self.recording_overlay.recording(elapsed, self.recorder.count())
                 self.message.setText(f"{duration_text(elapsed)} · {self.recorder.count():,} 個事件 · F8 儲存")
         except Exception as exc:
             was_recording = self.state == "recording"
@@ -675,6 +690,8 @@ class MainWindow(QMainWindow):
         if self.state == "recording":
             self.finish_recording(reason="關閉程式視窗")
         self.timer.stop()
+        self.recording_overlay.close()
+        self.recording_overlay.deleteLater()
         if self.hotkeys:
             self.hotkeys.close()
         if self.services:

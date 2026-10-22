@@ -43,6 +43,7 @@ class MouseRecorder:
         self.started = 0.0
         self.error = ""
         self.pressed: set[str] = set()
+        self.ignored_buttons: set[str] = set()
         self.position = (0, 0)
         self.clipped_events = 0
         self.first_clipped_position = None
@@ -81,7 +82,7 @@ class MouseRecorder:
 
     def _move(self, x, y, *unused):
         with self.lock:
-            if self.active:
+            if self.active and not self.ignored_buttons:
                 self._append("mouse.move", {"x": x, "y": y})
 
     def _click(self, x, y, button, pressed, *unused):
@@ -93,10 +94,15 @@ class MouseRecorder:
                 return
             # Do not record clicks on this tool, including its Stop button.
             if pressed:
-                if own_window_at(x, y) or name in self.pressed:
+                if own_window_at(x, y):
+                    self.ignored_buttons.add(name)
+                    return
+                if name in self.pressed:
                     return
                 if self._append("mouse.down", {"x": x, "y": y, "button": name}):
                     self.pressed.add(name)
+            elif name in self.ignored_buttons:
+                self.ignored_buttons.discard(name)
             elif name in self.pressed:
                 if self._append("mouse.up", {"x": x, "y": y, "button": name}):
                     self.pressed.discard(name)

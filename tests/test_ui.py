@@ -68,9 +68,31 @@ class UiTests(unittest.TestCase):
     def test_cancel_record_preparation_never_starts_listener(self):
         self.window.prepare_recording()
         self.assertEqual(self.window.state, "prepare_record")
+        self.assertTrue(self.window.recording_overlay.isVisible())
         self.window.stop()
+        self.assertFalse(self.window.recording_overlay.isVisible())
         self.assertIsNone(self.window.recorder)
         self.assertEqual(self.window.state, "idle")
+
+    def test_recording_overlay_only_announces_successful_start(self):
+        with patch('controlrecord.ui.MouseRecorder') as recorder, patch('controlrecord.ui.play_start_sound') as sound:
+            self.window.prepare_recording()
+            self.window.begin_recording()
+            self.assertEqual(self.window.state, 'recording')
+            self.assertIn('錄製中', self.window.recording_overlay.title.text())
+            sound.assert_called_once()
+            recorder.return_value.stop.return_value = self.window.selected_script()
+            self.window.finish_recording()
+            self.assertFalse(self.window.recording_overlay.isVisible())
+
+    def test_failed_recording_hides_overlay_and_does_not_play_sound(self):
+        with patch('controlrecord.ui.MouseRecorder') as recorder, patch('controlrecord.ui.play_start_sound') as sound, patch.object(self.window, 'error'), self.assertLogs(level='ERROR'):
+            recorder.return_value.start.side_effect = RuntimeError('listener failed')
+            self.window.prepare_recording()
+            self.window.begin_recording()
+            self.assertEqual(self.window.state, 'idle')
+            self.assertFalse(self.window.recording_overlay.isVisible())
+            sound.assert_not_called()
 
     def test_f12_sets_cancel_before_gui_event_delivery(self):
         self.window.prepare_run()
